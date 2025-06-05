@@ -850,6 +850,7 @@ impl CliOptions {
         allow_all: flags.allow_all,
         allow_env: handle_allow(flags.allow_all, flags.allow_env.clone()),
         deny_env: flags.deny_env.clone(),
+        deny_env_as_empty: flags.deny_env_as_empty,
         allow_net: handle_allow(flags.allow_all, flags.allow_net.clone()),
         deny_net: flags.deny_net.clone(),
         allow_ffi: handle_allow(flags.allow_all, flags.allow_ffi.clone()),

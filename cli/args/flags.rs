@@ -693,6 +693,7 @@ pub struct PermissionFlags {
   pub allow_all: bool,
   pub allow_env: Option<Vec<String>>,
   pub deny_env: Option<Vec<String>>,
+  pub deny_env_as_empty: bool,
   pub allow_ffi: Option<Vec<String>>,
   pub deny_ffi: Option<Vec<String>>,
   pub allow_net: Option<Vec<String>>,
@@ -849,6 +850,11 @@ impl Flags {
         args.push(s);
       }
       _ => {}
+    }
+
+    if self.permissions.deny_env_as_empty {
+      args.push("--deny-env-as-empty".to_string());
+      return args;
     }
 
     match &self.permissions.allow_run {
@@ -3605,6 +3611,7 @@ fn permission_args(app: Command, requires: Option<&'static str>) -> Command {
                                              <p(245)>--deny-net  |  --deny-net="localhost:8080,deno.land"</>
   <g>    --deny-env[=<<VARIABLE_NAME>...]</>      Deny access to environment variables. Optionally specify inacessible environment variables.
                                              <p(245)>--deny-env  |  --deny-env="PORT,HOME,PATH"</>
+  <g>    --deny-env-as-empty</>                   Return undefined for denied environment variables.
   <g>    --deny-sys[=<<API_NAME>...]</>           Deny access to OS information. Optionally deny specific APIs by function name.
                                              <p(245)>--deny-sys  |  --deny-sys="systemMemoryInfo,osRelease"</>
       <g>--deny-run[=<<PROGRAM_NAME>...]</>       Deny running subprocesses. Optionally specify denied runnable program names.
@@ -8318,6 +8325,25 @@ mod tests {
     assert!(r.is_err());
     let r = flags_from_vec(svec!["deno", "--deny-env=H\0ME", "script.ts"]);
     assert!(r.is_err());
+  }
+
+    #[test]
+  fn deny_env_as_empty() {
+    let r = flags_from_vec(svec!["deno", "run", "--deny-env-as-empty", "script.ts"]);
+    assert_eq!(
+      r.unwrap(),
+      Flags {
+        subcommand: DenoSubcommand::Run(RunFlags::new_default(
+          "script.ts".to_string()
+        )),
+        permissions: PermissionFlags {
+          deny_env_as_empty: true,
+          ..Default::default()
+        },
+        code_cache_enabled: true,
+        ..Flags::default()
+      }
+    );
   }
 
   #[test]
