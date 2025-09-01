@@ -50,6 +50,7 @@ Deno.test(
     };
 
     await Promise.race([promise, delay(500)]);
+    reject();
     worker.terminate();
 
     assertIsError(
