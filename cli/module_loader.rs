@@ -1065,7 +1065,7 @@ impl<TGraphContainer: ModuleGraphContainer> ModuleLoader
     async move {
       let graph_container = &inner.graph_container;
       let module_load_preparer = &inner.shared.module_load_preparer;
-      let permissions = if is_dynamic {
+      let permissions = if is_dynamic || inner.is_worker {
         &inner.permissions
       } else {
         &inner.parent_permissions
