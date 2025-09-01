@@ -35,7 +35,7 @@ Deno.test(
 
 Deno.test(
   { permissions: { import: true } },
-  async function workerEnvArrayPermissions() {
+  async function workerImportPermissions() {
     const { promise, resolve, reject } = Promise.withResolvers<boolean[]>();
 
     const worker = new Worker(
