@@ -1,5 +1,5 @@
 // Copyright 2018-2025 the Deno authors. MIT license.
-import { assertEquals } from "./test_util.ts";
+import { assertEquals, assertIsError, delay } from "./test_util.ts";
 
 Deno.test(
   { permissions: { env: true, read: true } },
@@ -30,5 +30,31 @@ Deno.test(
     } else {
       assertEquals(permissions, [true, false, false, true]);
     }
+  },
+);
+
+Deno.test(
+  { permissions: { import: true } },
+  async function workerEnvArrayPermissions() {
+    const { promise, resolve, reject } = Promise.withResolvers<boolean[]>();
+
+    const worker = new Worker(
+      import.meta.resolve(
+        "../testdata/workers/static_remote.ts",
+      ),
+      { type: "module", deno: { permissions: { import: false } } },
+    );
+
+    worker.onerror = (error) => {
+      resolve(error);
+    };
+
+    await Promise.race([promise, delay(500)]);
+    worker.terminate();
+
+    assertIsError(
+      await promise,
+      /Requires import access to "example.com:443", run again with the --allow-import flag/i,
+    );
   },
 );
