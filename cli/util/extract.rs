@@ -1,5 +1,6 @@
 // Copyright 2018-2026 the Deno authors. MIT license.
 
+use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::fmt::Write as _;
@@ -56,9 +57,10 @@ struct TestOrSnippet {
   has_deno_test: bool,
   shebang: Option<Shebang>,
   /// Human-friendly name for the generated `Deno.test` call, taken from the
-  /// title of the `@example` tag preceding the snippet or, failing that, the
-  /// name of the symbol the doc comment is attached to. When `None`, the
-  /// pseudo file specifier (e.g. `file:///main.ts$3-8.ts`) is used.
+  /// `title="..."` attribute of the code fence (e.g. ```` ```ts title="my
+  /// example" ````). When `None`, the pseudo file specifier (e.g.
+  /// `file:///main.ts$3-8.ts`) is used so that untitled snippets keep the
+  /// line range for disambiguation.
   title: Option<String>,
 }
 
@@ -140,7 +142,6 @@ fn extract_files_from_fenced_blocks(
     /* file line index */ 0,
     blocks_regex,
     lines_regex,
-    /* documented symbol */ None,
   )
 }
 
@@ -164,15 +165,6 @@ fn extract_files_from_source_comments(
   let lines_regex =
     lazy_regex::regex!(r"(?:\* ?)((#!+).*)|(?:\* ?)(?:\# ?)?(.*)");
 
-  // Index of declaration names by position, used to name extracted tests
-  // after the symbol the doc comment is attached to.
-  let documented_symbols = {
-    let mut collector = DocumentedSymbolCollector::default();
-    collector.visit_program(parsed_source.program().as_ref());
-    collector.symbols.sort_by_key(|(pos, _)| *pos);
-    collector.symbols
-  };
-
   let files = comments
     .iter()
     .filter(|comment| {
@@ -183,13 +175,6 @@ fn extract_files_from_source_comments(
       true
     })
     .flat_map(|comment| {
-      // The symbol documented by this comment is the first declaration
-      // following it.
-      let documented_symbol = {
-        let idx = documented_symbols
-          .partition_point(|(pos, _)| *pos < comment.end());
-        documented_symbols.get(idx).map(|(_, name)| name.as_str())
-      };
       extract_files_from_regex_blocks(
         specifier,
         &comment.text,
@@ -197,7 +182,6 @@ fn extract_files_from_source_comments(
         parsed_source.text_info_lazy().line_index(comment.start()),
         blocks_regex,
         lines_regex,
-        documented_symbol,
       )
     })
     .flatten()
@@ -213,28 +197,41 @@ fn extract_files_from_regex_blocks(
   file_line_index: usize,
   blocks_regex: &Regex,
   lines_regex: &Regex,
-  documented_symbol: Option<&str>,
 ) -> Result<Vec<TestOrSnippet>, AnyError> {
   let tests_regex = lazy_regex::regex!(r"(?m)^\s*Deno\.test\(");
+  // Same syntax as supported by `@deno/gfm` (and thus rendered on jsr.io):
+  // ```ts title="my example"
+  let title_regex = lazy_regex::regex!(r#"\stitle="(?P<title>[^"]*)""#);
 
-  // End of the previously matched block, so that an `@example` title is only
-  // attributed to the first code block following it.
-  let mut prev_block_end = 0;
   let files = blocks_regex
     .captures_iter(source)
     .filter_map(|block| {
-      let title_search_range =
-        prev_block_end..block.get(0).unwrap().start();
-      prev_block_end = block.get(0).unwrap().end();
-
       let is_markdown_blockquote = block
         .name("blockquote")
         .is_some_and(|blockquote| !blockquote.as_str().is_empty());
       block.name("attributes")?;
 
-      let maybe_attributes: Option<Vec<_>> = block
-        .name("attributes")
-        .map(|attributes| attributes.as_str().split(' ').collect());
+      // The `title="..."` attribute names the generated test and may contain
+      // spaces, so cut it out before the remaining attributes are split on
+      // spaces.
+      let mut title = None;
+      let maybe_attributes_text =
+        block.name("attributes").map(|attributes| {
+          match title_regex.captures(attributes.as_str()) {
+            Some(captures) => {
+              let value = captures.name("title").unwrap().as_str().trim();
+              if !value.is_empty() {
+                title = Some(value.to_string());
+              }
+              title_regex.replace(attributes.as_str(), "")
+            }
+            None => Cow::Borrowed(attributes.as_str()),
+          }
+        });
+
+      let maybe_attributes: Option<Vec<_>> = maybe_attributes_text
+        .as_deref()
+        .map(|attributes| attributes.split(' ').collect());
 
       let file_media_type = if let Some(attributes) = maybe_attributes {
         if attributes.contains(&"ignore") {
@@ -308,8 +305,6 @@ fn extract_files_from_regex_blocks(
           .map(|s| ModuleSpecifier::parse(&s).unwrap())
           .unwrap_or(file_specifier);
       let has_deno_test = tests_regex.is_match(&file_source);
-      let title = find_example_title(&source[title_search_range])
-        .or_else(|| documented_symbol.map(str::to_string));
       let file = File {
         url: file_specifier,
         mtime: None,
@@ -327,28 +322,6 @@ fn extract_files_from_regex_blocks(
     .collect();
 
   Ok(files)
-}
-
-/// Finds the inline title of the JSDoc `@example` tag closest to (i.e. last
-/// in) the given text preceding a code block, e.g. `Usage` in:
-///
-/// ```text
-/// * @example Usage
-/// * ```ts
-/// ```
-///
-/// Returns `None` when there is no `@example` tag or it has no inline title.
-fn find_example_title(preceding_text: &str) -> Option<String> {
-  let example_regex =
-    lazy_regex::regex!(r"(?m)^[ \t*>]*@example\b[ \t]*(?P<title>[^\r\n]*)$");
-  let title = example_regex
-    .captures_iter(preceding_text)
-    .last()?
-    .name("title")
-    .unwrap()
-    .as_str()
-    .trim();
-  (!title.is_empty()).then(|| title.to_string())
 }
 
 fn strip_markdown_blockquote_marker(line: &str) -> &str {
@@ -693,136 +666,6 @@ fn extract_sym_from_pat(pat: &ast::Pat) -> Vec<Atom> {
   let mut atoms = vec![];
   rec(pat, &mut atoms);
   atoms
-}
-
-/// Collects the source positions and names of declarations that a doc comment
-/// may be attached to, so that a test extracted from a doc comment can be
-/// named after the symbol it documents.
-#[derive(Default)]
-struct DocumentedSymbolCollector {
-  symbols: Vec<(deno_ast::SourcePos, Atom)>,
-  /// Names of the enclosing classes, used to qualify method names
-  /// (e.g. `MyClass.myMethod`).
-  class_stack: Vec<Atom>,
-}
-
-impl DocumentedSymbolCollector {
-  fn record(&mut self, pos: deno_ast::SourcePos, name: Atom) {
-    self.symbols.push((pos, name));
-  }
-}
-
-fn prop_name_atom(prop_name: &ast::PropName) -> Option<Atom> {
-  match prop_name {
-    ast::PropName::Ident(ident) => Some(ident.sym.clone()),
-    ast::PropName::Str(s) => Some(s.value.to_atom_lossy().into_owned()),
-    ast::PropName::Num(_)
-    | ast::PropName::Computed(_)
-    | ast::PropName::BigInt(_) => None,
-  }
-}
-
-impl Visit for DocumentedSymbolCollector {
-  fn visit_export_decl(&mut self, node: &ast::ExportDecl) {
-    // A doc comment on `export function foo() {}` precedes the `export`
-    // keyword, so the declaration name is also recorded at the export's
-    // position (the inner declaration records itself again slightly later,
-    // which is harmless for a nearest-position lookup).
-    let name = match &node.decl {
-      ast::Decl::Class(class) => Some(class.ident.sym.clone()),
-      ast::Decl::Fn(func) => Some(func.ident.sym.clone()),
-      ast::Decl::Var(var) => var
-        .decls
-        .first()
-        .and_then(|decl| extract_sym_from_pat(&decl.name).into_iter().next()),
-      ast::Decl::TsEnum(ts_enum) => Some(ts_enum.id.sym.clone()),
-      ast::Decl::TsTypeAlias(alias) => Some(alias.id.sym.clone()),
-      ast::Decl::TsInterface(iface) => Some(iface.id.sym.clone()),
-      ast::Decl::TsModule(ts_module) => match &ts_module.id {
-        ast::TsModuleName::Ident(ident) => Some(ident.sym.clone()),
-        ast::TsModuleName::Str(s) => {
-          Some(s.value.to_atom_lossy().into_owned())
-        }
-      },
-      ast::Decl::Using(_) => None,
-    };
-    if let Some(name) = name {
-      self.record(node.start(), name);
-    }
-    node.visit_children_with(self);
-  }
-
-  fn visit_export_default_decl(&mut self, node: &ast::ExportDefaultDecl) {
-    let name = match &node.decl {
-      ast::DefaultDecl::Class(class) => {
-        class.ident.as_ref().map(|ident| ident.sym.clone())
-      }
-      ast::DefaultDecl::Fn(func) => {
-        func.ident.as_ref().map(|ident| ident.sym.clone())
-      }
-      ast::DefaultDecl::TsInterfaceDecl(iface) => Some(iface.id.sym.clone()),
-    };
-    self.record(node.start(), name.unwrap_or_else(|| "default".into()));
-    node.visit_children_with(self);
-  }
-
-  fn visit_fn_decl(&mut self, node: &ast::FnDecl) {
-    self.record(node.start(), node.ident.sym.clone());
-    node.visit_children_with(self);
-  }
-
-  fn visit_class_decl(&mut self, node: &ast::ClassDecl) {
-    self.record(node.start(), node.ident.sym.clone());
-    self.class_stack.push(node.ident.sym.clone());
-    node.visit_children_with(self);
-    self.class_stack.pop();
-  }
-
-  fn visit_class_method(&mut self, node: &ast::ClassMethod) {
-    if let Some(name) = prop_name_atom(&node.key) {
-      let name = match self.class_stack.last() {
-        Some(class) => format!("{}.{}", class, name).into(),
-        None => name,
-      };
-      self.record(node.start(), name);
-    }
-    node.visit_children_with(self);
-  }
-
-  fn visit_var_decl(&mut self, node: &ast::VarDecl) {
-    if let Some(name) = node
-      .decls
-      .first()
-      .and_then(|decl| extract_sym_from_pat(&decl.name).into_iter().next())
-    {
-      self.record(node.start(), name);
-    }
-    node.visit_children_with(self);
-  }
-
-  fn visit_ts_interface_decl(&mut self, node: &ast::TsInterfaceDecl) {
-    self.record(node.start(), node.id.sym.clone());
-    node.visit_children_with(self);
-  }
-
-  fn visit_ts_type_alias_decl(&mut self, node: &ast::TsTypeAliasDecl) {
-    self.record(node.start(), node.id.sym.clone());
-    node.visit_children_with(self);
-  }
-
-  fn visit_ts_enum_decl(&mut self, node: &ast::TsEnumDecl) {
-    self.record(node.start(), node.id.sym.clone());
-    node.visit_children_with(self);
-  }
-
-  fn visit_ts_module_decl(&mut self, node: &ast::TsModuleDecl) {
-    let name = match &node.id {
-      ast::TsModuleName::Ident(ident) => ident.sym.clone(),
-      ast::TsModuleName::Str(s) => s.value.to_atom_lossy().into_owned(),
-    };
-    self.record(node.start(), name);
-    node.visit_children_with(self);
-  }
 }
 
 /// Generates a "pseudo" file from a given file by applying the following
