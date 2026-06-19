@@ -842,6 +842,8 @@ pub async fn bundle_for_compile(
   entrypoint: String,
   external: Vec<String>,
   minify: bool,
+  define: Vec<(String, String)>,
+  drop_labels: Vec<String>,
 ) -> Result<Vec<u8>, AnyError> {
   let bundle_flags = BundleFlags {
     entrypoints: vec![entrypoint],
@@ -858,6 +860,8 @@ pub async fn bundle_for_compile(
     sourcemap: None,
     platform: BundlePlatform::Deno,
     watch: false,
+    define,
+    drop_labels,
   };
 
   // Force bundle-style resolver config for the duration of bundling.
@@ -2558,6 +2562,17 @@ fn configure_esbuild_flags(
 
   if bundle_flags.keep_names {
     builder.raw_flag("--keep-names");
+  }
+
+  for (key, value) in &bundle_flags.define {
+    builder.define(key, value);
+  }
+
+  if !bundle_flags.drop_labels.is_empty() {
+    builder.raw_flag(format!(
+      "--drop-labels={}",
+      bundle_flags.drop_labels.join(",")
+    ));
   }
 
   if let Some(sourcemap_type) = bundle_flags.sourcemap {

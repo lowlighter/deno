@@ -396,6 +396,8 @@ async fn install_global_compiled(
     self_extracting: false,
     bundle: false,
     minify: false,
+    define: vec![],
+    drop_labels: vec![],
     exclude_unused_npm: false,
   };
 

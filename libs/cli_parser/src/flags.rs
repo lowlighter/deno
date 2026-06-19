@@ -180,6 +180,13 @@ pub struct CompileFlags {
   pub bundle: bool,
   /// Minify the bundle. Only meaningful with `bundle: true`.
   pub minify: bool,
+  /// Compile-time replacements as `(key, value)` pairs, forwarded to the
+  /// bundler. Only meaningful with `bundle: true`. Mirrors esbuild's
+  /// `--define`.
+  pub define: Vec<(String, String)>,
+  /// Labeled statements (and their bodies) to drop from the bundle. Only
+  /// meaningful with `bundle: true`. Mirrors esbuild's `--drop-labels`.
+  pub drop_labels: Vec<String>,
   /// Prune the embedded managed npm snapshot to only those packages reachable
   /// from npm specifiers in the module graph. Opt-in because non-statically
   /// analyzable dynamic imports may not appear in the graph; pass
@@ -723,6 +730,13 @@ pub struct BundleFlags {
   pub platform: BundlePlatform,
   pub watch: bool,
   pub declaration: bool,
+  /// Compile-time replacements as `(key, value)` pairs, where `value` is a
+  /// raw JavaScript expression substituted wherever `key` appears as an
+  /// identifier. Mirrors esbuild's `--define`.
+  pub define: Vec<(String, String)>,
+  /// Labeled statements (and their bodies) to drop from the output. Mirrors
+  /// esbuild's `--drop-labels`.
+  pub drop_labels: Vec<String>,
 }
 
 impl From<BundleOptions> for BundleFlags {
@@ -742,6 +756,8 @@ impl From<BundleOptions> for BundleFlags {
       inline_imports: value.inline_imports,
       packages: value.packages,
       declaration: false,
+      define: value.define.into_iter().collect(),
+      drop_labels: value.drop_labels,
     }
   }
 }

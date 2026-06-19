@@ -1,0 +1,30 @@
+{
+  "tempDir": true,
+  "tests": {
+    "define": {
+      "steps": [
+        {
+          "args": [
+            "bundle",
+            "--output=out.js",
+            "--define",
+            "DEBUG=false",
+            "--define",
+            "VERSION=\"1.2.3\"",
+            "main.ts"
+          ],
+          "output": "[WILDCARD]"
+        },
+        {
+          "args": "run --no-lock --cached-only --no-config -A out.js",
+          "output": "release build\nversion 1.2.3\n"
+        }
+      ]
+    },
+    "invalid_define": {
+      "args": "bundle --output=out.js --define DEBUG main.ts",
+      "output": "invalid_define.out",
+      "exitCode": 1
+    }
+  }
+}

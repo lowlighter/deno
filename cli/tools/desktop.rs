@@ -395,6 +395,8 @@ async fn compile_desktop(
     self_extracting,
     bundle: false,
     minify: false,
+    define: vec![],
+    drop_labels: vec![],
     exclude_unused_npm: false,
   };
 

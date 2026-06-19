@@ -2122,6 +2122,8 @@ If no output file is given, the output is written to standard output:
           .help("Generate .d.ts declaration files alongside the bundle")
           .action(ArgAction::SetTrue),
       )
+      .arg(define_arg())
+      .arg(drop_labels_arg())
       .arg(allow_scripts_arg())
       .arg(allow_import_arg())
       .arg(deny_import_arg())
@@ -2367,6 +2369,16 @@ On the first invocation of `deno compile`, Deno will download the relevant binar
           .help(cstr!("<y>Experimental.</> Minify the bundled output. Only meaningful with <c>--bundle</>.
   <p(245)>Reduces both the embedded bundle size and runtime memory use, at the cost of less readable stack traces.</>"))
           .action(ArgAction::SetTrue)
+          .requires("bundle")
+          .help_heading(COMPILE_HEADING),
+      )
+      .arg(
+        define_arg()
+          .requires("bundle")
+          .help_heading(COMPILE_HEADING),
+      )
+      .arg(
+        drop_labels_arg()
           .requires("bundle")
           .help_heading(COMPILE_HEADING),
       )
@@ -6472,6 +6484,70 @@ fn bench_parse(
   Ok(())
 }
 
+fn define_arg() -> Arg {
+  Arg::new("define")
+    .long("define")
+    .help(cstr!("Substitute a global identifier with a constant expression at build time, e.g. <c>--define DEBUG=false</>
+  <p(245)>The value is a raw JavaScript expression, so string literals must be quoted: <c>--define VERSION='\"1.0.0\"'</>.
+  May be specified multiple times.</>"))
+    .action(ArgAction::Append)
+    .num_args(1)
+    .value_parser(value_parser!(String))
+}
+
+fn drop_labels_arg() -> Arg {
+  Arg::new("drop-labels")
+    .long("drop-labels")
+    .help(cstr!("Drop labeled statements (and their bodies) with these labels from the output, e.g. <c>--drop-labels=DEV,DEBUG</>
+  <p(245)>Useful for stripping development-only code. May be a comma-separated list and specified multiple times.</>"))
+    .action(ArgAction::Append)
+    .num_args(1)
+    .value_parser(value_parser!(String))
+}
+
+/// Parse the collected `--define KEY=VALUE` arguments. `VALUE` is kept verbatim
+/// (it is a raw JavaScript expression handed straight to the bundler), so the
+/// only validation is that a non-empty key and a `=` are present.
+fn define_arg_parse(
+  matches: &mut ArgMatches,
+) -> clap::error::Result<Vec<(String, String)>> {
+  let Some(values) = matches.remove_many::<String>("define") else {
+    return Ok(vec![]);
+  };
+  values
+    .map(|value| match value.split_once('=') {
+      Some((key, val)) if !key.is_empty() => {
+        Ok((key.to_string(), val.to_string()))
+      }
+      _ => Err(clap::Error::raw(
+        clap::error::ErrorKind::InvalidValue,
+        format!(
+          "expected --define value in the form KEY=VALUE, but got '{value}'\n"
+        ),
+      )),
+    })
+    .collect()
+}
+
+fn drop_labels_arg_parse(matches: &mut ArgMatches) -> Vec<String> {
+  matches
+    .remove_many::<String>("drop-labels")
+    .map(|values| {
+      // Accept both repeated flags and comma-separated lists, e.g.
+      // `--drop-labels=DEV,TEST` or `--drop-labels DEV --drop-labels TEST`.
+      values
+        .flat_map(|value| {
+          value
+            .split(',')
+            .map(|label| label.trim().to_string())
+            .filter(|label| !label.is_empty())
+            .collect::<Vec<_>>()
+        })
+        .collect()
+    })
+    .unwrap_or_default()
+}
+
 fn bundle_parse(
   flags: &mut Flags,
   matches: &mut ArgMatches,
@@ -6506,6 +6582,8 @@ fn bundle_parse(
     platform: matches.remove_one::<BundlePlatform>("platform").unwrap(),
     sourcemap: matches.remove_one::<SourceMapType>("sourcemap"),
     declaration: matches.get_flag("declaration"),
+    define: define_arg_parse(matches)?,
+    drop_labels: drop_labels_arg_parse(matches),
   });
   Ok(())
 }
@@ -6627,6 +6705,8 @@ fn compile_parse(
     self_extracting,
     bundle,
     minify,
+    define: define_arg_parse(matches)?,
+    drop_labels: drop_labels_arg_parse(matches),
     exclude_unused_npm,
   });
 
@@ -11470,6 +11550,76 @@ mod tests {
   }
 
   #[test]
+  fn bundle_define_and_drop_labels() {
+    let flags = flags_from_vec(svec![
+      "deno",
+      "bundle",
+      "--define",
+      "DEBUG=false",
+      "--define",
+      "VERSION=\"1.0.0\"",
+      "--drop-labels=DEV,TEST",
+      "main.ts"
+    ])
+    .unwrap();
+    let DenoSubcommand::Bundle(bundle_flags) = flags.subcommand else {
+      panic!("expected bundle subcommand");
+    };
+    assert_eq!(
+      bundle_flags.define,
+      vec![
+        ("DEBUG".to_string(), "false".to_string()),
+        ("VERSION".to_string(), "\"1.0.0\"".to_string()),
+      ]
+    );
+    assert_eq!(
+      bundle_flags.drop_labels,
+      vec!["DEV".to_string(), "TEST".to_string()]
+    );
+  }
+
+  #[test]
+  fn bundle_invalid_define_errors() {
+    let err =
+      flags_from_vec(svec!["deno", "bundle", "--define", "DEBUG", "main.ts"])
+        .unwrap_err();
+    assert!(err.to_string().contains("KEY=VALUE"));
+  }
+
+  #[test]
+  fn compile_define_requires_bundle() {
+    // `--define` is only meaningful alongside `--bundle`.
+    let err = flags_from_vec(svec![
+      "deno",
+      "compile",
+      "--define",
+      "DEBUG=false",
+      "main.ts"
+    ])
+    .unwrap_err();
+    assert!(err.to_string().contains("--bundle"));
+
+    let flags = flags_from_vec(svec![
+      "deno",
+      "compile",
+      "--bundle",
+      "--define",
+      "DEBUG=false",
+      "--drop-labels=DEV",
+      "main.ts"
+    ])
+    .unwrap();
+    let DenoSubcommand::Compile(compile_flags) = flags.subcommand else {
+      panic!("expected compile subcommand");
+    };
+    assert_eq!(
+      compile_flags.define,
+      vec![("DEBUG".to_string(), "false".to_string())]
+    );
+    assert_eq!(compile_flags.drop_labels, vec!["DEV".to_string()]);
+  }
+
+  #[test]
   fn dep_and_registry_subcommands_env_file_explicit_and_multiple() {
     // An explicit path is honored.
     let flags =
@@ -13524,6 +13674,8 @@ mod tests {
           self_extracting: false,
           bundle: false,
           minify: false,
+          define: vec![],
+          drop_labels: vec![],
           exclude_unused_npm: false,
         }),
         type_check_mode: TypeCheckMode::Local,
@@ -13563,6 +13715,8 @@ mod tests {
           self_extracting: false,
           bundle: false,
           minify: false,
+          define: vec![],
+          drop_labels: vec![],
           exclude_unused_npm: false,
         }),
         type_check_mode: TypeCheckMode::Local,
@@ -13594,6 +13748,8 @@ mod tests {
           self_extracting: false,
           bundle: false,
           minify: false,
+          define: vec![],
+          drop_labels: vec![],
           exclude_unused_npm: false,
         }),
         import_map_path: Some("import_map.json".to_string()),
@@ -16363,6 +16519,8 @@ Usage: deno lint [OPTIONS] [files]...\n"
           self_extracting: false,
           bundle: false,
           minify: false,
+          define: vec![],
+          drop_labels: vec![],
           exclude_unused_npm: false,
         }),
         type_check_mode: TypeCheckMode::Local,
