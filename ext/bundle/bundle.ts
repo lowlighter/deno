@@ -4,14 +4,28 @@ import { op_bundle } from "ext:core/ops";
 import { core, primordials } from "ext:core/mod.js";
 const { TextDecoder } = core.loadExtScript("ext:deno_web/08_text_encoding.js");
 
-const { SafeArrayIterator, Uint8Array, ObjectPrototypeIsPrototypeOf } =
-  primordials;
+const {
+  SafeArrayIterator,
+  Uint8Array,
+  ObjectPrototypeIsPrototypeOf,
+  ObjectKeys,
+  JSONStringify,
+} = primordials;
 
 const decoder = new TextDecoder();
 
 export async function bundle(
   options: Deno.bundle.Options,
 ): Promise<Deno.bundle.Result> {
+  if (options.define !== undefined) {
+    // Values are JS literals; serialize each to the source text esbuild
+    // substitutes (e.g. false -> "false", "1.0.0" -> "\"1.0.0\"").
+    const define = { __proto__: null };
+    for (const key of new SafeArrayIterator(ObjectKeys(options.define))) {
+      define[key] = JSONStringify(options.define[key]);
+    }
+    options = { ...options, define };
+  }
   const result = {
     success: false,
     ...await op_bundle(

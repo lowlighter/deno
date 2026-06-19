@@ -6496,9 +6496,9 @@ fn define_arg() -> Arg {
 }
 
 fn drop_labels_arg() -> Arg {
-  Arg::new("drop-labels")
-    .long("drop-labels")
-    .help(cstr!("Drop labeled statements (and their bodies) with these labels from the output, e.g. <c>--drop-labels=DEV,DEBUG</>
+  Arg::new("drop-label")
+    .long("drop-label")
+    .help(cstr!("Drop labeled statements (and their bodies) with these labels from the output, e.g. <c>--drop-label=DEV,DEBUG</>
   <p(245)>Useful for stripping development-only code. May be a comma-separated list and specified multiple times.</>"))
     .action(ArgAction::Append)
     .num_args(1)
@@ -6522,7 +6522,7 @@ fn define_arg_parse(
       _ => Err(clap::Error::raw(
         clap::error::ErrorKind::InvalidValue,
         format!(
-          "expected --define value in the form KEY=VALUE, but got '{value}'\n"
+          "expected --define value in the form KEY=VALUE, but got '{value}'"
         ),
       )),
     })
@@ -6531,10 +6531,8 @@ fn define_arg_parse(
 
 fn drop_labels_arg_parse(matches: &mut ArgMatches) -> Vec<String> {
   matches
-    .remove_many::<String>("drop-labels")
+    .remove_many::<String>("drop-label")
     .map(|values| {
-      // Accept both repeated flags and comma-separated lists, e.g.
-      // `--drop-labels=DEV,TEST` or `--drop-labels DEV --drop-labels TEST`.
       values
         .flat_map(|value| {
           value
@@ -11558,7 +11556,7 @@ mod tests {
       "DEBUG=false",
       "--define",
       "VERSION=\"1.0.0\"",
-      "--drop-labels=DEV,TEST",
+      "--drop-label=DEV,TEST",
       "main.ts"
     ])
     .unwrap();
@@ -11605,7 +11603,7 @@ mod tests {
       "--bundle",
       "--define",
       "DEBUG=false",
-      "--drop-labels=DEV",
+      "--drop-label=DEV",
       "main.ts"
     ])
     .unwrap();

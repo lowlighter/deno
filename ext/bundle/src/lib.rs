@@ -85,13 +85,8 @@ pub struct BundleOptions {
   pub sourcemap: Option<SourceMapType>,
   #[from_v8(serde, default)]
   pub platform: BundlePlatform,
-  /// Compile-time replacements. Each key is replaced with the corresponding
-  /// value (a raw JavaScript expression) wherever it appears as an
-  /// identifier. Mirrors esbuild's `define`.
   #[from_v8(serde, default)]
   pub define: std::collections::BTreeMap<String, String>,
-  /// Labeled statements to drop from the output, along with their bodies.
-  /// Mirrors esbuild's `dropLabels`.
   #[from_v8(serde, default)]
   pub drop_labels: Vec<String>,
   #[from_v8(default = true)]

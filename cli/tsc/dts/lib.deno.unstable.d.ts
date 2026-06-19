@@ -101,17 +101,16 @@ declare namespace Deno {
       /**
        * Compile-time replacements. Each key is substituted with the
        * corresponding value wherever it appears as an identifier in the
-       * source. The value is a raw JavaScript expression, so string literals
-       * must include quotes.
+       * source. Values are passed as JavaScript literals.
        *
        * ```ts
        * await Deno.bundle({
        *   entrypoints: ["./main.ts"],
-       *   define: { DEBUG: "false", VERSION: '"1.0.0"' },
+       *   define: { DEBUG: false, VERSION: "1.0.0" },
        * });
        * ```
        */
-      define?: Record<string, string>;
+      define?: Record<string, string | number | boolean | null>;
       /**
        * Labeled statements with these labels (along with their bodies) are
        * dropped from the output. Useful for stripping development-only code.

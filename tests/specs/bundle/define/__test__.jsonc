@@ -1,7 +1,7 @@
 {
   "tempDir": true,
   "tests": {
-    "define": {
+    "cli_define_and_drop_label": {
       "steps": [
         {
           "args": [
@@ -11,6 +11,7 @@
             "DEBUG=false",
             "--define",
             "VERSION=\"1.2.3\"",
+            "--drop-label=DEV,TEST",
             "main.ts"
           ],
           "output": "[WILDCARD]"
@@ -21,10 +22,34 @@
         }
       ]
     },
-    "invalid_define": {
+    "cli_drop_single_label": {
+      "steps": [
+        {
+          "args": "bundle --output=out.js --define DEBUG=false --define VERSION=\"1.2.3\" --drop-label=DEV main.ts",
+          "output": "[WILDCARD]"
+        },
+        {
+          "args": "run --no-lock --cached-only --no-config -A out.js",
+          "output": "test-only logging\nrelease build\nversion 1.2.3\n"
+        }
+      ]
+    },
+    "cli_invalid_define": {
       "args": "bundle --output=out.js --define DEBUG main.ts",
       "output": "invalid_define.out",
       "exitCode": 1
+    },
+    "api_define_and_drop_labels": {
+      "steps": [
+        {
+          "args": "run --unstable-bundle -A build.ts",
+          "output": "success: true\n"
+        },
+        {
+          "args": "run --no-lock --cached-only --no-config -A out_api.js",
+          "output": "test-only logging\nrelease build\nversion 1.2.3\n"
+        }
+      ]
     }
   }
 }
