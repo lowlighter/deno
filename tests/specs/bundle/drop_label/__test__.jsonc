@@ -1,0 +1,41 @@
+{
+  "tempDir": true,
+  "tests": {
+    "cli_drop_labels": {
+      "steps": [
+        {
+          "args": "bundle --output=out.js --drop-label=DEV,TEST main.ts",
+          "output": "[WILDCARD]"
+        },
+        {
+          "args": "run --no-lock --cached-only --no-config -A out.js",
+          "output": "always runs\n"
+        }
+      ]
+    },
+    "cli_drop_single_label": {
+      "steps": [
+        {
+          "args": "bundle --output=out.js --drop-label=DEV main.ts",
+          "output": "[WILDCARD]"
+        },
+        {
+          "args": "run --no-lock --cached-only --no-config -A out.js",
+          "output": "test-only logging\nalways runs\n"
+        }
+      ]
+    },
+    "api_drop_labels": {
+      "steps": [
+        {
+          "args": "run --unstable-bundle -A build.ts",
+          "output": "success: true\n"
+        },
+        {
+          "args": "run --no-lock --cached-only --no-config -A out_api.js",
+          "output": "test-only logging\nalways runs\n"
+        }
+      ]
+    }
+  }
+}
