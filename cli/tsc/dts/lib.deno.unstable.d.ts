@@ -4693,6 +4693,24 @@ interface WorkerOptions {
   deno?: {
     /** Set to `"none"` to disable all the permissions in the worker. */
     permissions?: Deno.PermissionOptions;
+    /** **UNSTABLE**: New API, yet to be vetted.
+     *
+     * When `true`, the worker's statically analyzable imports are exempt from
+     * the worker's own import permission. Such imports are resolved under the
+     * spawning thread's permissions while the worker's module graph is built —
+     * equivalent to bundling the worker into a self-contained module, but
+     * without materializing the bundle — so a worker with restricted (or no)
+     * import permission can still load the remote dependencies its source
+     * statically imports, as long as the spawning thread is itself allowed to
+     * import them.
+     *
+     * Only genuinely dynamic `import()` (specifiers that cannot be statically
+     * analyzed) remains gated by the worker's own permissions.
+     *
+     * When `false` (the default) the worker's static imports follow its own
+     * import permission, exactly like its dynamic imports.
+     */
+    allowStaticImports?: boolean;
   };
 }
 

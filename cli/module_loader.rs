@@ -473,6 +473,7 @@ impl CliModuleLoaderFactory {
     graph_container: TGraphContainer,
     lib: TsTypeLib,
     is_worker: bool,
+    allow_static_imports: bool,
     parent_permissions: PermissionsContainer,
     permissions: PermissionsContainer,
     maybe_main_module_blob: Option<(ModuleSpecifier, Arc<Blob>)>,
@@ -483,6 +484,7 @@ impl CliModuleLoaderFactory {
       Rc::new(CliModuleLoader(Rc::new(CliModuleLoaderInner {
         lib,
         is_worker,
+        allow_static_imports,
         parent_permissions,
         permissions,
         graph_container: graph_container.clone(),
@@ -551,6 +553,7 @@ impl ModuleLoaderFactory for CliModuleLoaderFactory {
       (*self.shared.main_module_graph_container).clone(),
       self.shared.lib_window,
       /* is worker */ false,
+      /* inherit static imports */ false,
       root_permissions.clone(),
       root_permissions,
       None,
@@ -559,6 +562,7 @@ impl ModuleLoaderFactory for CliModuleLoaderFactory {
 
   fn create_for_worker(
     &self,
+    allow_static_imports: bool,
     parent_permissions: PermissionsContainer,
     permissions: PermissionsContainer,
     maybe_main_module_blob: Option<(ModuleSpecifier, Arc<Blob>)>,
@@ -570,6 +574,7 @@ impl ModuleLoaderFactory for CliModuleLoaderFactory {
       ))),
       self.shared.lib_worker,
       /* is worker */ true,
+      allow_static_imports,
       parent_permissions,
       permissions,
       maybe_main_module_blob,
@@ -586,6 +591,7 @@ struct ModuleCodeStringSource {
 struct CliModuleLoaderInner<TGraphContainer: ModuleGraphContainer> {
   lib: TsTypeLib,
   is_worker: bool,
+  allow_static_imports: bool,
   /// The initial set of permissions used to resolve the static imports in the
   /// worker. These are "allow all" for main worker, and parent thread
   /// permissions for Web Worker.
@@ -1705,11 +1711,20 @@ impl<TGraphContainer: ModuleGraphContainer> ModuleLoader
       }
 
       // A Web Worker's own statically analyzable remote imports must be checked
-      // against the worker's own permissions, not the parent thread's to honor
-      // the specified `deno.permissions.import` and match behavior with main
-      // graph. Dynamic `import()` is already checked against the worker's
+      // against the worker's own permissions, not the parent thread's, to honor
+      // the specified `deno.permissions.import` and match the main graph's
+      // behavior. Dynamic `import()` is already checked against the worker's
       // permissions while the graph is built.
-      if inner.is_worker && !options.is_dynamic_import {
+      //
+      // `allowStaticImports` opts out of this check: the worker's static graph
+      // is resolved under the spawner's (parent thread's) permissions during
+      // graph build — like bundling the worker into a self-contained module —
+      // so those imports are trusted and only genuinely dynamic `import()`
+      // remains gated by the worker's own permissions.
+      if inner.is_worker
+        && !options.is_dynamic_import
+        && !inner.allow_static_imports
+      {
         let graph = graph_container.graph();
         for module in graph.modules() {
           let specifier = module.specifier();
